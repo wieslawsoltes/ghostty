@@ -88,6 +88,12 @@ pub fn initShared(
     });
     _ = try deps.add(lib);
 
+    // On Darwin, link Metal framework for the Metal renderer backend
+    if (deps.config.target.result.os.tag.isDarwin()) {
+        lib.linkFramework("Metal");
+        lib.linkFramework("MetalKit");
+    }
+
     // Get our debug symbols
     const dsymutil: ?std.Build.LazyPath = dsymutil: {
         if (!deps.config.target.result.os.tag.isDarwin()) {

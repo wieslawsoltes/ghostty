@@ -142,6 +142,9 @@ pub fn build(b: *std.Build) !void {
             libghostty_shared.installHeader(); // Only need one header
             libghostty_shared.install("libghostty.so");
             libghostty_static.install("libghostty.a");
+        } else {
+            libghostty_shared.installHeader();
+            libghostty_shared.install("libghostty.dylib");
         }
     }
 
