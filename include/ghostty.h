@@ -1114,6 +1114,35 @@ bool ghostty_surface_read_text(ghostty_surface_t,
                                ghostty_text_s*);
 void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
 
+// Screen state reading for custom rendering
+typedef struct {
+  uint32_t codepoint;
+  uint8_t fg_r;
+  uint8_t fg_g;
+  uint8_t fg_b;
+  uint8_t bg_r;
+  uint8_t bg_g;
+  uint8_t bg_b;
+  bool has_bg;
+  uint16_t attrs;
+  uint8_t wide;
+} ghostty_cell_info_s;
+
+typedef struct {
+  uint16_t x;
+  uint16_t y;
+  uint8_t style;
+  bool visible;
+} ghostty_cursor_info_s;
+
+void ghostty_surface_screen_lock(ghostty_surface_t);
+void ghostty_surface_screen_unlock(ghostty_surface_t);
+void ghostty_surface_cursor_info(ghostty_surface_t, ghostty_cursor_info_s*);
+uint32_t ghostty_surface_get_row_cells(ghostty_surface_t,
+                                       uint32_t,
+                                       ghostty_cell_info_s*,
+                                       uint32_t);
+
 #ifdef __APPLE__
 void ghostty_surface_set_display_id(ghostty_surface_t, uint32_t);
 void* ghostty_surface_quicklook_font(ghostty_surface_t);

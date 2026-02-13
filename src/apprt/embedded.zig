@@ -1361,6 +1361,28 @@ pub const CAPI = struct {
         }
     };
 
+    // ghostty_cell_info_s — cell information for custom rendering
+    const CellInfo = extern struct {
+        codepoint: u32,
+        fg_r: u8,
+        fg_g: u8,
+        fg_b: u8,
+        bg_r: u8,
+        bg_g: u8,
+        bg_b: u8,
+        has_bg: bool,
+        attrs: u16,
+        wide: u8,
+    };
+
+    // ghostty_cursor_info_s — cursor position and style
+    const CursorInfo = extern struct {
+        x: u16,
+        y: u16,
+        style_v: u8,
+        visible: bool,
+    };
+
     // Reference the conditional exports based on target platform
     // so they're included in the C API.
     comptime {
@@ -1653,6 +1675,127 @@ pub const CAPI = struct {
 
     export fn ghostty_surface_free_text(ptr: *Text) void {
         ptr.deinit();
+    }
+
+    /// Lock the terminal screen state for reading cell data.
+    /// Must be paired with ghostty_surface_screen_unlock.
+    export fn ghostty_surface_screen_lock(surface: *Surface) void {
+        surface.core_surface.renderer_state.mutex.lock();
+    }
+
+    /// Unlock the terminal screen state after reading.
+    export fn ghostty_surface_screen_unlock(surface: *Surface) void {
+        surface.core_surface.renderer_state.mutex.unlock();
+    }
+
+    /// Get cursor position and style info. Must be called while screen is locked.
+    export fn ghostty_surface_cursor_info(surface: *Surface, result: *CursorInfo) void {
+        const t = surface.core_surface.renderer_state.terminal;
+        const screen = t.screens.active;
+        result.* = .{
+            .x = screen.cursor.x,
+            .y = screen.cursor.y,
+            .style_v = @intFromEnum(screen.cursor.cursor_style),
+            .visible = true,
+        };
+    }
+
+    /// Get resolved cell data for a viewport row. Must be called while screen is locked.
+    /// Returns the number of cells actually written to the buffer.
+    export fn ghostty_surface_get_row_cells(
+        surface: *Surface,
+        row: u32,
+        cells_buf: [*]CellInfo,
+        max_cells: u32,
+    ) u32 {
+        const t = surface.core_surface.renderer_state.terminal;
+        const screen = t.screens.active;
+        const grid_size = surface.core_surface.size.grid();
+        const cols: u32 = grid_size.columns;
+        const actual_cols = @min(cols, max_cells);
+
+        // Default fallback colors
+        const default_fg = t.colors.foreground.get() orelse terminal.color.RGB{ .r = 0xdd, .g = 0xdd, .b = 0xdd };
+        const default_bg = t.colors.background.get() orelse terminal.color.RGB{ .r = 0x00, .g = 0x00, .b = 0x00 };
+        const palette = &t.colors.palette.current;
+
+        // Clamp row to valid range
+        const max_row = grid_size.rows -| 1;
+        const row_clamped: terminal.size.CellCountInt = @intCast(@min(row, max_row));
+
+        // Get a pin to the start of this row in the viewport
+        const pin = screen.pages.pin(.{ .viewport = .{
+            .x = 0,
+            .y = row_clamped,
+        } }) orelse {
+            // Row not available, fill with empty cells
+            for (0..actual_cols) |i| {
+                cells_buf[i] = .{
+                    .codepoint = 0,
+                    .fg_r = default_fg.r,
+                    .fg_g = default_fg.g,
+                    .fg_b = default_fg.b,
+                    .bg_r = default_bg.r,
+                    .bg_g = default_bg.g,
+                    .bg_b = default_bg.b,
+                    .has_bg = false,
+                    .attrs = 0,
+                    .wide = 0,
+                };
+            }
+            return actual_cols;
+        };
+
+        // Get all cells in this row from the page
+        const rc = pin.rowAndCell();
+        const all_cells = pin.node.data.getCells(rc.row);
+
+        for (0..actual_cols) |col| {
+            if (col >= all_cells.len) {
+                cells_buf[col] = .{
+                    .codepoint = 0,
+                    .fg_r = default_fg.r,
+                    .fg_g = default_fg.g,
+                    .fg_b = default_fg.b,
+                    .bg_r = default_bg.r,
+                    .bg_g = default_bg.g,
+                    .bg_b = default_bg.b,
+                    .has_bg = false,
+                    .attrs = 0,
+                    .wide = 0,
+                };
+                continue;
+            }
+
+            const cell = &all_cells[col];
+            const s = pin.style(cell);
+
+            // Resolve foreground color
+            const resolved_fg = s.fg(.{
+                .default = default_fg,
+                .palette = palette,
+                .bold = null,
+            });
+
+            // Resolve background color
+            const resolved_bg = s.bg(cell, palette);
+            const bg_color = resolved_bg orelse default_bg;
+
+            cells_buf[col] = .{
+                .codepoint = cell.codepoint(),
+                .fg_r = resolved_fg.r,
+                .fg_g = resolved_fg.g,
+                .fg_b = resolved_fg.b,
+                .bg_r = bg_color.r,
+                .bg_g = bg_color.g,
+                .bg_b = bg_color.b,
+                .has_bg = resolved_bg != null,
+                .attrs = @bitCast(s.flags),
+                .wide = @intFromEnum(cell.wide),
+            };
+        }
+
+        return actual_cols;
     }
 
     /// Tell the surface that it needs to schedule a render
