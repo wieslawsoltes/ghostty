@@ -31,10 +31,8 @@ pub fn init(b: *std.Build, cfg: *const Config) !HelpStrings {
     exe.root_module.addOptions("build_options", options);
 
     const help_run = b.addRunArtifact(exe);
-
-    // Generated Zig files have to end with .zig
-    const wf = b.addWriteFiles();
-    const output = wf.addCopyFile(help_run.captureStdOut(), "helpgen.zig");
+    // Generated Zig files have to end with .zig.
+    const output = help_run.addOutputFileArg("helpgen.zig");
 
     return .{
         .exe = exe,

@@ -11,9 +11,29 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
+    const args = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, args);
+
+    // Optional first arg is an output file path. When provided, write directly
+    // to that file instead of stdout so build-step output capture is not required.
+    if (args.len >= 2) {
+        var file = try std.fs.cwd().createFile(args[1], .{ .truncate = true });
+        defer file.close();
+
+        var buf: [4096]u8 = undefined;
+        var file_writer = file.writer(&buf);
+        try generate(alloc, &file_writer.interface);
+        try file_writer.end();
+        return;
+    }
+
     var buf: [4096]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&buf);
-    const writer = &stdout.interface;
+    var stdout_writer = std.fs.File.stdout().writer(&buf);
+    try generate(alloc, &stdout_writer.interface);
+    try stdout_writer.end();
+}
+
+fn generate(alloc: std.mem.Allocator, writer: *std.Io.Writer) !void {
     try writer.writeAll(
         \\// THIS FILE IS AUTO GENERATED
         \\
@@ -23,7 +43,6 @@ pub fn main() !void {
     try genConfig(alloc, writer);
     try genActions(alloc, writer);
     try genKeybindActions(alloc, writer);
-    try stdout.end();
 }
 
 fn genConfig(alloc: std.mem.Allocator, writer: *std.Io.Writer) !void {
