@@ -6,6 +6,7 @@
 const CodepointWidth = @This();
 
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Benchmark = @import("Benchmark.zig");
@@ -68,7 +69,9 @@ pub fn benchmark(self: *CodepointWidth) Benchmark {
     return .init(self, .{
         .stepFn = switch (self.opts.mode) {
             .noop => stepNoop,
-            .wcwidth => stepWcwidth,
+            // Windows doesn't expose a libc wcwidth symbol, so use the
+            // table implementation for this benchmark mode there.
+            .wcwidth => if (builtin.target.os.tag == .windows) stepTable else stepWcwidth,
             .table => stepTable,
             .simd => stepSimd,
         },
@@ -104,6 +107,10 @@ fn stepNoop(ptr: *anyopaque) Benchmark.Error!void {
 extern "c" fn wcwidth(c: u32) c_int;
 
 fn stepWcwidth(ptr: *anyopaque) Benchmark.Error!void {
+    if (comptime builtin.target.os.tag == .windows) {
+        return stepTable(ptr);
+    }
+
     const self: *CodepointWidth = @ptrCast(@alignCast(ptr));
 
     const f = self.data_f orelse return;

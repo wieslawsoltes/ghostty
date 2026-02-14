@@ -96,10 +96,13 @@ pub fn build(b: *std.Build) !void {
         b,
         &deps,
     );
-    const libghostty_static = try buildpkg.GhosttyLib.initStatic(
-        b,
-        &deps,
-    );
+    const libghostty_static: ?buildpkg.GhosttyLib = if (config.target.result.os.tag.isDarwin())
+        try buildpkg.GhosttyLib.initStatic(
+            b,
+            &deps,
+        )
+    else
+        null;
 
     // libghostty-vt
     const libghostty_vt_shared = shared: {
@@ -140,8 +143,11 @@ pub fn build(b: *std.Build) !void {
         // build on macOS this way ironically so we need to fix that.
         if (!config.target.result.os.tag.isDarwin()) {
             libghostty_shared.installHeader(); // Only need one header
-            libghostty_shared.install("libghostty.so");
-            libghostty_static.install("libghostty.a");
+            libghostty_shared.install(if (config.target.result.os.tag == .windows)
+                "ghostty.dll"
+            else
+                "libghostty.so");
+            if (libghostty_static) |v| v.install("libghostty.a");
         } else {
             libghostty_shared.installHeader();
             libghostty_shared.install("libghostty.dylib");
