@@ -483,6 +483,11 @@ pub const Surface = struct {
         var config = try apprt.surface.newConfig(app.core_app, &app.config, opts.context);
         defer config.deinit();
 
+        // Force Unicode grapheme clustering behavior for embedded consumers.
+        // This enables mode 2027 by default in the terminal and ensures
+        // regional-indicator pairs are clustered/rendered as flags.
+        config.@"grapheme-width-method" = .unicode;
+
         // If we have a working directory from the options then we set it.
         if (opts.working_directory) |c_wd| {
             const wd = std.mem.sliceTo(c_wd, 0);
