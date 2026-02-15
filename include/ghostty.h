@@ -1129,6 +1129,11 @@ typedef struct {
 } ghostty_cell_info_s;
 
 typedef struct {
+  uint32_t offset;
+  uint32_t length;
+} ghostty_cell_grapheme_span_s;
+
+typedef struct {
   uint16_t x;
   uint16_t y;
   uint8_t style;
@@ -1142,6 +1147,16 @@ uint32_t ghostty_surface_get_row_cells(ghostty_surface_t,
                                        uint32_t,
                                        ghostty_cell_info_s*,
                                        uint32_t);
+uint32_t ghostty_surface_get_row_cells_with_graphemes(
+    ghostty_surface_t,
+    uint32_t,
+    ghostty_cell_info_s*,
+    uint32_t,
+    ghostty_cell_grapheme_span_s*,
+    uint32_t,
+    uint32_t*,
+    uint32_t,
+    uint32_t*);
 
 #ifdef __APPLE__
 void ghostty_surface_set_display_id(ghostty_surface_t, uint32_t);

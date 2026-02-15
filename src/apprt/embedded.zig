@@ -1383,6 +1383,12 @@ pub const CAPI = struct {
         visible: bool,
     };
 
+    // ghostty_cell_grapheme_span_s — per-cell grapheme span index.
+    const CellGraphemeSpan = extern struct {
+        offset: u32,
+        length: u32,
+    };
+
     // Reference the conditional exports based on target platform
     // so they're included in the C API.
     comptime {
@@ -1708,11 +1714,67 @@ pub const CAPI = struct {
         cells_buf: [*]CellInfo,
         max_cells: u32,
     ) u32 {
+        return surface_get_row_cells_common(
+            surface,
+            row,
+            cells_buf,
+            max_cells,
+            null,
+            0,
+            null,
+            0,
+            null,
+        );
+    }
+
+    /// Get resolved cell data plus optional grapheme spans and flattened
+    /// trailing grapheme codepoints for a viewport row.
+    /// Must be called while screen is locked.
+    export fn ghostty_surface_get_row_cells_with_graphemes(
+        surface: *Surface,
+        row: u32,
+        cells_buf: [*]CellInfo,
+        max_cells: u32,
+        grapheme_spans_buf: ?[*]CellGraphemeSpan,
+        max_spans: u32,
+        grapheme_codepoints_buf: ?[*]u32,
+        max_grapheme_codepoints: u32,
+        grapheme_codepoints_written: ?*u32,
+    ) u32 {
+        return surface_get_row_cells_common(
+            surface,
+            row,
+            cells_buf,
+            max_cells,
+            grapheme_spans_buf,
+            max_spans,
+            grapheme_codepoints_buf,
+            max_grapheme_codepoints,
+            grapheme_codepoints_written,
+        );
+    }
+
+    fn surface_get_row_cells_common(
+        surface: *Surface,
+        row: u32,
+        cells_buf: [*]CellInfo,
+        max_cells: u32,
+        grapheme_spans_buf: ?[*]CellGraphemeSpan,
+        max_spans: u32,
+        grapheme_codepoints_buf: ?[*]u32,
+        max_grapheme_codepoints: u32,
+        grapheme_codepoints_written: ?*u32,
+    ) u32 {
         const t = surface.core_surface.renderer_state.terminal;
         const screen = t.screens.active;
         const grid_size = surface.core_surface.size.grid();
         const cols: u32 = grid_size.columns;
         const actual_cols = @min(cols, max_cells);
+        const actual_spans = @min(actual_cols, max_spans);
+
+        if (grapheme_codepoints_written) |written| {
+            written.* = 0;
+        }
 
         // Default fallback colors
         const default_fg = t.colors.foreground.get() orelse terminal.color.RGB{ .r = 0xdd, .g = 0xdd, .b = 0xdd };
@@ -1742,6 +1804,12 @@ pub const CAPI = struct {
                     .attrs = 0,
                     .wide = 0,
                 };
+                if (grapheme_spans_buf != null and i < actual_spans) {
+                    grapheme_spans_buf.?[i] = .{
+                        .offset = 0,
+                        .length = 0,
+                    };
+                }
             }
             return actual_cols;
         };
@@ -1749,6 +1817,7 @@ pub const CAPI = struct {
         // Get all cells in this row from the page
         const rc = pin.rowAndCell();
         const all_cells = pin.node.data.getCells(rc.row);
+        var grapheme_write_idx: u32 = 0;
 
         for (0..actual_cols) |col| {
             if (col >= all_cells.len) {
@@ -1764,11 +1833,22 @@ pub const CAPI = struct {
                     .attrs = 0,
                     .wide = 0,
                 };
+
+                if (grapheme_spans_buf != null and col < actual_spans) {
+                    grapheme_spans_buf.?[col] = .{
+                        .offset = grapheme_write_idx,
+                        .length = 0,
+                    };
+                }
                 continue;
             }
 
             const cell = &all_cells[col];
             const s = pin.style(cell);
+            var span: CellGraphemeSpan = .{
+                .offset = grapheme_write_idx,
+                .length = 0,
+            };
 
             // Resolve foreground color
             const resolved_fg = s.fg(.{
@@ -1793,6 +1873,30 @@ pub const CAPI = struct {
                 .attrs = @bitCast(s.flags),
                 .wide = @intFromEnum(cell.wide),
             };
+
+            if (cell.hasGrapheme() and grapheme_codepoints_buf != null) {
+                if (pin.node.data.lookupGrapheme(cell)) |trailing| {
+                    const trailing_len_u32: u32 = @intCast(trailing.len);
+                    if (trailing_len_u32 > 0 and
+                        trailing_len_u32 <= max_grapheme_codepoints -| grapheme_write_idx)
+                    {
+                        const dst = grapheme_codepoints_buf.?[grapheme_write_idx .. grapheme_write_idx + trailing_len_u32];
+                        for (trailing, 0..) |cp, i| {
+                            dst[i] = @intCast(cp);
+                        }
+                        span.length = trailing_len_u32;
+                        grapheme_write_idx += trailing_len_u32;
+                    }
+                }
+            }
+
+            if (grapheme_spans_buf != null and col < actual_spans) {
+                grapheme_spans_buf.?[col] = span;
+            }
+        }
+
+        if (grapheme_codepoints_written) |written| {
+            written.* = grapheme_write_idx;
         }
 
         return actual_cols;
